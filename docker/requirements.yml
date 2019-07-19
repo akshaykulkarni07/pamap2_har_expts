@@ -1,0 +1,12 @@
+channels:
+  - conda-forge
+dependencies:
+  - matplotlib 
+  - numpy
+  - pandas
+  - pip
+  - pip:
+    - nbconvert==5.3.1
+    - tornado==4.2
+    - imblearn
+    - ipython-autotime
