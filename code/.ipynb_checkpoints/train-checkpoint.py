@@ -76,13 +76,13 @@ class ConvNet(nn.Module):
     def __init__(self):
         super(ConvNet, self).__init__()
         # defining layers
-        self.conv1 = nn.Conv1d(3, 5, 5)
-        self.conv2 = nn.Conv1d(5, 10, 5)
-        self.conv3 = nn.Conv1d(10, 15, 5)
-        self.conv4 = nn.Conv1d(15, 20, 5)
+        self.conv1 = nn.Conv1d(3, 5, 3)
+        self.conv2 = nn.Conv1d(5, 10, 3)
+        self.conv3 = nn.Conv1d(10, 15, 3)
+        self.conv4 = nn.Conv1d(15, 20, 3)
 #         self.conv3 = nn.Conv1d(15, 20, 3)
-        self.fc1 = nn.Linear(34 * 20, 12)
-        self.fc2 = nn.Linear(34 * 20, 4)
+        self.fc1 = nn.Linear(42 * 20, 12)
+        self.fc2 = nn.Linear(42 * 20, 4)
 #         self.fc2 = nn.Linear(128, 64)
 #         self.fc3 = nn.Linear(64, 4)
         
@@ -101,7 +101,7 @@ class ConvNet(nn.Module):
         out = F.relu(self.conv3(out))
         out = F.relu(self.conv4(out))
         out = torch.transpose(out, 1, 2)
-        out = out.reshape(-1, 34 * 20)
+        out = out.reshape(-1, 42 * 20)
         if flag : 
             out = F.log_softmax(self.fc2(out), dim = 1)
         else :
@@ -113,12 +113,12 @@ if torch.cuda.is_available():
     print('Model on GPU')
     Net = Net.cuda()
 
-# Net.load_state_dict(torch.load('saved_models/model1.pt')) 
+# Net.load_state_dict(torch.load('saved_models/model3.pt')) 
 
 criterion = nn.CrossEntropyLoss()
 optimizer = optim.Adam(Net.parameters(), lr = 1e-3)
 
-num_epochs = 100
+num_epochs = 200
 total_step = len(trainset) // (train_batch_size * reqd_len)
 train_loss_list = list()
 val_loss_list = list()
@@ -176,7 +176,7 @@ for epoch in range(num_epochs):
     if val_loss < min_val :
         print('saving model')
         min_val = val_loss
-        torch.save(Net.state_dict(), 'saved_models/model2.pt')
+        torch.save(Net.state_dict(), 'saved_models/model3.pt')
 
 
 # j = np.arange(60)
@@ -216,7 +216,7 @@ Net.cuda()
 print(_get_accuracy(trainloader, Net) * 100, '/', _get_accuracy(valloader, Net) * 100, '/', _get_accuracy(testloader, Net) * 100)
 
 testing_Net = ConvNet()
-testing_Net.load_state_dict(torch.load('saved_models/model2.pt'))
+testing_Net.load_state_dict(torch.load('saved_models/model3.pt'))
 testing_Net.eval().cuda()
 print(_get_accuracy(trainloader, testing_Net) * 100, '/', _get_accuracy(valloader, testing_Net) * 100, '/', _get_accuracy(testloader, testing_Net) * 100)
 
