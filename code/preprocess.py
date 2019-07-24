@@ -25,7 +25,7 @@ import csv
 import numpy as np
 
 # constant length of each example
-reqd_len = 50
+reqd_len = 100
 
 path = '../data/cleaned_new3.csv'
 

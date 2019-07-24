@@ -1,4 +1,4 @@
-FROM airlab404/dl:cuda10_pytorch_py36
+FROM cannici/dl:cuda10_pytorch1.1.0_py36
 
 MAINTAINER Marco Cannici "marco.cannici@polimi.it"
 

@@ -4,7 +4,6 @@ import matplotlib.pyplot as plt
 import torch
 from torch.utils.data import Dataset, DataLoader, SubsetRandomSampler
 from torch.utils.data.dataloader import default_collate
-# from torch.utils.tensorboard import SummaryWriter
 import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
@@ -14,12 +13,10 @@ from torch.autograd import Variable
 from mpl_toolkits.mplot3d import Axes3D
 print(torch.__version__)
 
-# Writer will output to ./runs/ directory by default
-# writer = SummaryWriter()
 
 # #### Dataset Class (loads data from csv)
 
-reqd_len = 100
+reqd_len = 50
 channels = 3
 classes = 12
 class IMUDataset(Dataset):
@@ -75,6 +72,23 @@ def output_size(n, f, p = 0, s = 1):
     '''
     return (((n + 2 * p - f) / s) + 1)
 
+def running_std_dev(signal, window_size = 10):
+    ''' Returns running standard deviation of 3D signal (batch_size, length, channels)
+    Output length is window_size less than input length i.e. output shape is (batch_size, length - window_size, channels)
+    '''
+    mean = torch.zeros((signal.shape[0], signal.shape[1] - window_size, signal.shape[2]))
+    if torch.cuda.is_available() : 
+        mean = mean.cuda()
+    for i in range(signal.shape[0]) :
+        for j in range(signal.shape[1] - window_size) : 
+            mean[i][j] = signal[i][j : j + window_size].std(dim = 0)
+            
+#     for i in range(signal.shape[0]) :
+#         for j in range(signal.shape[1] - window_size, signal.shape[1]) :
+#             mean[i][j] = np.abs(signal[i][j])
+            
+    return mean
+
 class ConvNet(nn.Module):
     def __init__(self):
         super(ConvNet, self).__init__()
@@ -82,7 +96,7 @@ class ConvNet(nn.Module):
         self.conv1 = nn.Conv1d(3, 5, 3)
         self.conv2 = nn.Conv1d(5, 10, 3)
 #         self.conv3 = nn.Conv1d(15, 20, 3)
-        self.fc1 = nn.Linear(96 * 10, 256)
+        self.fc1 = nn.Linear(36 * 10, 256)
         self.fc2 = nn.Linear(256, 64)
         self.pamap = nn.Linear(64, 12)
         self.robogame = nn.Linear(64, 4)
@@ -98,11 +112,12 @@ class ConvNet(nn.Module):
         
     # use flag = True during fine-tuning 
     def forward(self, signal, flag = False):
+        signal = running_std_dev(signal)
         signal = torch.transpose(signal, 1, 2)
         out = F.relu(self.conv1(signal))
         out = F.relu(self.conv2(out))
         out = torch.transpose(out, 1, 2)
-        out = out.reshape(-1, 96 * 10)
+        out = out.reshape(-1, 36 * 10)
         out = F.relu(self.fc1(out))
         out = F.relu(self.fc2(out))
         if flag : 
@@ -121,7 +136,7 @@ if torch.cuda.is_available():
 criterion = nn.CrossEntropyLoss()
 optimizer = optim.Adam(Net.parameters(), lr = 1e-3)
 
-num_epochs = 200
+num_epochs = 100
 total_step = len(trainset) // (train_batch_size * reqd_len)
 train_loss_list = list()
 val_loss_list = list()
@@ -176,15 +191,10 @@ for epoch in range(num_epochs):
     val_loss_list.append(val_loss)
     print('epoch : ', epoch, ' / ', num_epochs, ' | TL : ', train_loss, ' | VL : ', val_loss)
     
-#     j = np.arange(len(train_loss_list))
-#     fig, ax = plt.subplots()
-#     ax.plot(j, train_loss_list, 'r', j, val_loss_list, 'g')
-#     writer.add_figure('loss', fig, global_step = epoch + 1)
-    
     if val_loss < min_val :
         print('saving model')
         min_val = val_loss
-        torch.save(Net.state_dict(), 'saved_models/reqd_len100/model0.pt')
+        torch.save(Net.state_dict(), 'saved_models/model5_std.pt')
 
 
 # j = np.arange(60)
@@ -224,7 +234,7 @@ Net.cuda()
 print(_get_accuracy(trainloader, Net) * 100, '/', _get_accuracy(valloader, Net) * 100, '/', _get_accuracy(testloader, Net) * 100)
 
 testing_Net = ConvNet()
-testing_Net.load_state_dict(torch.load('saved_models/reqd_len100/model0.pt'))
+testing_Net.load_state_dict(torch.load('saved_models/model5_std.pt'))
 testing_Net.eval().cuda()
 print(_get_accuracy(trainloader, testing_Net) * 100, '/', _get_accuracy(valloader, testing_Net) * 100, '/', _get_accuracy(testloader, testing_Net) * 100)
 

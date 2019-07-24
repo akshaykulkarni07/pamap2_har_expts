@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import torch
 from torch.utils.data import Dataset, DataLoader, SubsetRandomSampler
 from torch.utils.data.dataloader import default_collate
+# from torch.utils.tensorboard import SummaryWriter
 import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
@@ -13,10 +14,12 @@ from torch.autograd import Variable
 from mpl_toolkits.mplot3d import Axes3D
 print(torch.__version__)
 
+# Writer will output to ./runs/ directory by default
+# writer = SummaryWriter()
 
 # #### Dataset Class (loads data from csv)
 
-reqd_len = 50
+reqd_len = 100
 channels = 3
 classes = 12
 class IMUDataset(Dataset):
@@ -79,7 +82,7 @@ class ConvNet(nn.Module):
         self.conv1 = nn.Conv1d(3, 5, 3)
         self.conv2 = nn.Conv1d(5, 10, 3)
 #         self.conv3 = nn.Conv1d(15, 20, 3)
-        self.fc1 = nn.Linear(46 * 10, 256)
+        self.fc1 = nn.Linear(96 * 10, 256)
         self.fc2 = nn.Linear(256, 64)
         self.pamap = nn.Linear(64, 12)
         self.robogame = nn.Linear(64, 4)
@@ -99,13 +102,13 @@ class ConvNet(nn.Module):
         out = F.relu(self.conv1(signal))
         out = F.relu(self.conv2(out))
         out = torch.transpose(out, 1, 2)
-        out = out.reshape(-1, 46 * 10)
+        out = out.reshape(-1, 96 * 10)
         out = F.relu(self.fc1(out))
         out = F.relu(self.fc2(out))
         if flag : 
-            out = F.log_softmax(self.robogame(out), dim = 1)
+            out = self.robogame(out)
         else :
-            out = F.log_softmax(self.pamap(out), dim = 1)
+            out = self.pamap(out)
         return out
 
 Net = ConvNet()
@@ -173,10 +176,15 @@ for epoch in range(num_epochs):
     val_loss_list.append(val_loss)
     print('epoch : ', epoch, ' / ', num_epochs, ' | TL : ', train_loss, ' | VL : ', val_loss)
     
+#     j = np.arange(len(train_loss_list))
+#     fig, ax = plt.subplots()
+#     ax.plot(j, train_loss_list, 'r', j, val_loss_list, 'g')
+#     writer.add_figure('loss', fig, global_step = epoch + 1)
+    
     if val_loss < min_val :
         print('saving model')
         min_val = val_loss
-        torch.save(Net.state_dict(), 'saved_models/model5.pt')
+        torch.save(Net.state_dict(), 'saved_models/reqd_len100/model0.pt')
 
 
 # j = np.arange(60)
@@ -216,7 +224,7 @@ Net.cuda()
 print(_get_accuracy(trainloader, Net) * 100, '/', _get_accuracy(valloader, Net) * 100, '/', _get_accuracy(testloader, Net) * 100)
 
 testing_Net = ConvNet()
-testing_Net.load_state_dict(torch.load('saved_models/model5.pt'))
+testing_Net.load_state_dict(torch.load('saved_models/reqd_len100/model0.pt'))
 testing_Net.eval().cuda()
 print(_get_accuracy(trainloader, testing_Net) * 100, '/', _get_accuracy(valloader, testing_Net) * 100, '/', _get_accuracy(testloader, testing_Net) * 100)
 

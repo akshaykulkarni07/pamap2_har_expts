@@ -4,7 +4,6 @@ import matplotlib.pyplot as plt
 import torch
 from torch.utils.data import Dataset, DataLoader, SubsetRandomSampler
 from torch.utils.data.dataloader import default_collate
-# from torch.utils.tensorboard import SummaryWriter
 import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
@@ -14,12 +13,10 @@ from torch.autograd import Variable
 from mpl_toolkits.mplot3d import Axes3D
 print(torch.__version__)
 
-# Writer will output to ./runs/ directory by default
-# writer = SummaryWriter()
 
 # #### Dataset Class (loads data from csv)
 
-reqd_len = 100
+reqd_len = 50
 channels = 3
 classes = 12
 class IMUDataset(Dataset):
@@ -75,43 +72,157 @@ def output_size(n, f, p = 0, s = 1):
     '''
     return (((n + 2 * p - f) / s) + 1)
 
-class ConvNet(nn.Module):
-    def __init__(self):
-        super(ConvNet, self).__init__()
-        # defining layers
-        self.conv1 = nn.Conv1d(3, 5, 3)
-        self.conv2 = nn.Conv1d(5, 10, 3)
-#         self.conv3 = nn.Conv1d(15, 20, 3)
-        self.fc1 = nn.Linear(96 * 10, 256)
-        self.fc2 = nn.Linear(256, 64)
-        self.pamap = nn.Linear(64, 12)
-        self.robogame = nn.Linear(64, 4)
-#         self.fc2 = nn.Linear(128, 64)
-#         self.fc3 = nn.Linear(64, 4)
+class block(nn.Module):
+    def __init__(self, filters, subsample=False):
+        super().__init__()
+        """
+        A 2-layer residual learning building block as illustrated by Fig.2
+        in "Deep Residual Learning for Image Recognition"
         
-        nn.init.xavier_uniform_(self.conv1.weight, gain = nn.init.calculate_gain('relu'))
-        nn.init.xavier_uniform_(self.conv2.weight, gain = nn.init.calculate_gain('relu'))
-        nn.init.xavier_uniform_(self.fc1.weight, gain = nn.init.calculate_gain('relu'))
-        nn.init.xavier_uniform_(self.fc2.weight, gain = nn.init.calculate_gain('relu'))
-        nn.init.xavier_uniform_(self.pamap.weight, gain = nn.init.calculate_gain('sigmoid'))
-        nn.init.xavier_uniform_(self.robogame.weight, gain = nn.init.calculate_gain('sigmoid'))
+        Parameters:
         
-    # use flag = True during fine-tuning 
-    def forward(self, signal, flag = False):
-        signal = torch.transpose(signal, 1, 2)
-        out = F.relu(self.conv1(signal))
-        out = F.relu(self.conv2(out))
-        out = torch.transpose(out, 1, 2)
-        out = out.reshape(-1, 96 * 10)
-        out = F.relu(self.fc1(out))
-        out = F.relu(self.fc2(out))
-        if flag : 
-            out = F.log_softmax(self.robogame(out), dim = 1)
-        else :
-            out = F.log_softmax(self.pamap(out), dim = 1)
-        return out
+        - filters:   int
+                     the number of filters for all layers in this block
+                   
+        - subsample: boolean
+                     whether to subsample the input feature maps with stride 2
+                     and doubling in number of filters
+                     
+        Attributes:
+        
+        - shortcuts: boolean
+                     When false the residual shortcut is removed
+                     resulting in a 'plain' convolutional block.
+        """
+        # Determine subsampling
+        s = 0.5 if subsample else 1.0
+        
+        # Setup layers
+        self.conv1 = nn.Conv1d(int(filters*s), filters, kernel_size=3, 
+                               stride=int(1/s), padding=1, bias=False)
+        self.bn1   = nn.BatchNorm1d(filters, track_running_stats=True)
+        self.relu1 = nn.ReLU()
+        self.conv2 = nn.Conv1d(filters, filters, kernel_size=3, stride=1, padding=1, bias=False)
+        self.bn2   = nn.BatchNorm1d(filters, track_running_stats=True)
+        self.relu2 = nn.ReLU()
 
-Net = ConvNet()
+        # Shortcut downsampling
+        self.downsample = nn.AvgPool1d(kernel_size=1, stride=2)
+
+        # Initialise weights according to the method described in 
+        # “Delving deep into rectifiers: Surpassing human-level performance on ImageNet 
+        # classification” - He, K. et al. (2015)
+        for m in self.modules():
+            if isinstance(m, nn.Conv1d):
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+            elif isinstance(m, nn.BatchNorm1d):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)   
+        
+    def shortcut(self, z, x):
+        """ 
+        Implements parameter free shortcut connection by identity mapping.
+        If dimensions of input x are greater than activations then this
+        is rectified by downsampling and then zero padding dimension 1
+        as described by option A in paper.
+        
+        Parameters:
+        - x: tensor
+             the input to the block
+        - z: tensor
+             activations of block prior to final non-linearity
+        """
+        if x.shape != z.shape:
+            d = self.downsample(x)
+            p = torch.mul(d, 0)
+            return z + torch.cat((d, p), dim=1)
+        else:
+            return z + x
+    
+    def forward(self, x, shortcuts=False):
+        z = self.conv1(x)
+        z = self.bn1(z)
+        z = self.relu1(z)
+        
+        z = self.conv2(z)
+        z = self.bn2(z)
+        
+        # Shortcut connection
+        # This if statement is the only difference between
+        # a convolutional net and a resnet!
+        if shortcuts:
+            z = self.shortcut(z, x)
+
+        z = self.relu2(z)
+        
+        return z
+    
+
+
+class ResNet(nn.Module):
+    def __init__(self, n, shortcuts=True):
+        super().__init__()
+        self.shortcuts = shortcuts
+        
+        # Input
+        self.convIn = nn.Conv1d(3, 16, kernel_size=3, stride=1, padding=1, bias=False)
+        self.bnIn   = nn.BatchNorm1d(16, track_running_stats=True)
+        self.relu   = nn.ReLU()
+        
+        # Stack1
+        self.stack1 = nn.ModuleList([block(16, subsample=False) for _ in range(n)])
+
+        # Stack2
+#         self.stack2a = block(32, subsample=True)
+#         self.stack2b = nn.ModuleList([block(32, subsample=False) for _ in range(n-1)])
+
+#         # Stack3
+#         self.stack3a = block(64, subsample=True)
+#         self.stack3b = nn.ModuleList([block(64, subsample=False) for _ in range(n-1)])
+        
+        # Output
+        # The parameters of this average pool are not specified in paper.
+        # Initially I tried kernel_size=2 stride=2 resulting in 
+        # 64*4*4= 1024 inputs to the fully connected layer. More aggresive
+        # pooling as implemented below results in better results and also
+        # better matches the total model parameter count cited by authors.
+        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+        self.fcOut = nn.Linear(1, 12, bias = True)
+        self.fcOut2 = nn.Linear(1, 4, bias = True)
+        self.softmax = nn.LogSoftmax(dim=-1)
+        
+        # Initilise weights in fully connected layer 
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.kaiming_normal_(m.weight)
+                m.bias.data.zero_()      
+        
+    # set flag = True for fine-tuning
+    def forward(self, x, flag = False):
+        x = torch.transpose(x, 1, 2)
+        z = self.convIn(x)
+        z = self.bnIn(z)
+        z = self.relu(z)
+        
+        for l in self.stack1: z = l(z, shortcuts=self.shortcuts)
+        
+#         z = self.stack2a(z, shortcuts=self.shortcuts)
+#         for l in self.stack2b: 
+#             z = l(z, shortcuts=self.shortcuts)
+        
+#         z = self.stack3a(z, shortcuts=self.shortcuts)
+#         for l in self.stack3b: 
+#             z = l(z, shortcuts=self.shortcuts)
+
+        z = self.avgpool(z)
+        z = z.view(z.size(0), -1)
+        if flag : 
+            z = self.fcOut2(z)
+        else : 
+            z = self.fcOut(z)
+        return self.softmax(z)
+
+Net = ResNet(n = 2, shortcuts = True)
 if torch.cuda.is_available():
     print('Model on GPU')
     Net = Net.cuda()
@@ -121,7 +232,7 @@ if torch.cuda.is_available():
 criterion = nn.CrossEntropyLoss()
 optimizer = optim.Adam(Net.parameters(), lr = 1e-3)
 
-num_epochs = 200
+num_epochs = 100
 total_step = len(trainset) // (train_batch_size * reqd_len)
 train_loss_list = list()
 val_loss_list = list()
@@ -176,15 +287,10 @@ for epoch in range(num_epochs):
     val_loss_list.append(val_loss)
     print('epoch : ', epoch, ' / ', num_epochs, ' | TL : ', train_loss, ' | VL : ', val_loss)
     
-#     j = np.arange(len(train_loss_list))
-#     fig, ax = plt.subplots()
-#     ax.plot(j, train_loss_list, 'r', j, val_loss_list, 'g')
-#     writer.add_figure('loss', fig, global_step = epoch + 1)
-    
     if val_loss < min_val :
         print('saving model')
         min_val = val_loss
-        torch.save(Net.state_dict(), 'saved_models/reqd_len100/model0.pt')
+        torch.save(Net.state_dict(), 'saved_models/model6.pt')
 
 
 # j = np.arange(60)
@@ -224,7 +330,7 @@ Net.cuda()
 print(_get_accuracy(trainloader, Net) * 100, '/', _get_accuracy(valloader, Net) * 100, '/', _get_accuracy(testloader, Net) * 100)
 
 testing_Net = ConvNet()
-testing_Net.load_state_dict(torch.load('saved_models/reqd_len100/model0.pt'))
+testing_Net.load_state_dict(torch.load('saved_models/model6.pt'))
 testing_Net.eval().cuda()
 print(_get_accuracy(trainloader, testing_Net) * 100, '/', _get_accuracy(valloader, testing_Net) * 100, '/', _get_accuracy(testloader, testing_Net) * 100)
 
