@@ -81,18 +81,11 @@ class ConvNet(nn.Module):
         # defining layers
         self.conv1 = nn.Conv1d(3, 5, 3)
         self.conv2 = nn.Conv1d(5, 10, 3)
-#         self.conv3 = nn.Conv1d(15, 20, 3)
-        self.fc1 = nn.Linear(96 * 10, 256)
-        self.fc2 = nn.Linear(256, 64)
-        self.pamap = nn.Linear(64, 12)
-        self.robogame = nn.Linear(64, 4)
-#         self.fc2 = nn.Linear(128, 64)
-#         self.fc3 = nn.Linear(64, 4)
+        self.pamap = nn.Linear(96 * 10, 12)
+        self.robogame = nn.Linear(96 * 10, 4)
         
         nn.init.xavier_uniform_(self.conv1.weight, gain = nn.init.calculate_gain('relu'))
         nn.init.xavier_uniform_(self.conv2.weight, gain = nn.init.calculate_gain('relu'))
-        nn.init.xavier_uniform_(self.fc1.weight, gain = nn.init.calculate_gain('relu'))
-        nn.init.xavier_uniform_(self.fc2.weight, gain = nn.init.calculate_gain('relu'))
         nn.init.xavier_uniform_(self.pamap.weight, gain = nn.init.calculate_gain('sigmoid'))
         nn.init.xavier_uniform_(self.robogame.weight, gain = nn.init.calculate_gain('sigmoid'))
         
@@ -103,12 +96,10 @@ class ConvNet(nn.Module):
         out = F.relu(self.conv2(out))
         out = torch.transpose(out, 1, 2)
         out = out.reshape(-1, 96 * 10)
-        out = F.relu(self.fc1(out))
-        out = F.relu(self.fc2(out))
         if flag : 
-            out = F.log_softmax(self.robogame(out), dim = 1)
+            out = self.robogame(out)
         else :
-            out = F.log_softmax(self.pamap(out), dim = 1)
+            out = self.pamap(out)
         return out
 
 Net = ConvNet()
@@ -148,7 +139,7 @@ for epoch in range(num_epochs):
         loss.backward()
         optimizer.step()
 
-        if i % 200 == 0 :
+        if i % 150 == 0 :
             print('epoch = ', epoch, ' step = ', i, ' of total steps ', total_step, ' loss = ', loss.item())
             
     train_loss = (sum(trn) / len(trn))
@@ -184,7 +175,7 @@ for epoch in range(num_epochs):
     if val_loss < min_val :
         print('saving model')
         min_val = val_loss
-        torch.save(Net.state_dict(), 'saved_models/reqd_len100/model0.pt')
+        torch.save(Net.state_dict(), 'saved_models/reqd_len100/model1.pt')
 
 
 # j = np.arange(60)
@@ -201,6 +192,7 @@ def _get_accuracy(dataloader, Net):
         outputs = Net(images)
         
         outputs = outputs.cpu()
+        outputs = F.log_softmax(outputs, dim = 1)
     
         _, label_ind = torch.max(labels, 1)
         _, pred_ind = torch.max(outputs, 1)
@@ -224,7 +216,7 @@ Net.cuda()
 print(_get_accuracy(trainloader, Net) * 100, '/', _get_accuracy(valloader, Net) * 100, '/', _get_accuracy(testloader, Net) * 100)
 
 testing_Net = ConvNet()
-testing_Net.load_state_dict(torch.load('saved_models/reqd_len100/model0.pt'))
+testing_Net.load_state_dict(torch.load('saved_models/reqd_len100/model1.pt'))
 testing_Net.eval().cuda()
 print(_get_accuracy(trainloader, testing_Net) * 100, '/', _get_accuracy(valloader, testing_Net) * 100, '/', _get_accuracy(testloader, testing_Net) * 100)
 
