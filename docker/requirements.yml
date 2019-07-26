@@ -1,6 +1,8 @@
 channels:
   - conda-forge
 dependencies:
+  - tensorflow-gpu
+  - keras
   - matplotlib 
   - numpy
   - pandas

@@ -1,5 +1,5 @@
 # NVIDIA-Docker run options
-# docker_args: -p 8890:8888
+docker_args: -p 8890:8888
 
 # Run script options
 # To run the container multiple times
